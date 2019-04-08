@@ -1,0 +1,7 @@
+This data was obtained in the following:
+
+  - mature.fa.gz is a current download from mirbase.org
+  - seqs.txt and pssms.json were obtained by running the
+    example data with the original FIRM and writing it out
+    into text and JSON formats
+
