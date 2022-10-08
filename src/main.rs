@@ -10,7 +10,8 @@ use std::fs::File;
 use json;
 use json::JsonValue;
 use rayon::prelude::*;
-use clap::{Arg, App};
+//use clap::{Arg, App};
+use clap::Parser;
 
 const KMER8: &str = "8mer";
 const KMER7_M8: &str = "7mer-m8";
@@ -76,11 +77,10 @@ fn is_valid_mirna(s: &str, minor: bool, p5: bool, p3: bool) -> bool {
 
 fn read_mirnas(path: &str, seed_start: usize, seed_end: usize, minor: bool,
                p5: bool, p3: bool) -> HashMap<String, String> {
-    use std::io;
     use std::io::BufRead;
-    use std::fs::File;
     use flate2::read::GzDecoder;
 
+    println!("PATH: {}", path);
     let file = match File::open(path) {
         Err(why) => panic!("can't open mirbase input file: {}", why),
         Ok(file) => file,
@@ -518,8 +518,20 @@ fn viterbi(obs: &Vec<char>, states: &Vec<&String>, start_p: &HashMap<&String, f6
     max_prob
 }
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about=None)]
+struct Args {
+    seqs: String,
+    pssms: String,
+    mirbase: String,
+    outfile: String
+}
+
+
 fn main() -> io::Result<()> {
     use itertools::join;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
 
     // Parameters
     let wobble = true;
@@ -530,30 +542,14 @@ fn main() -> io::Result<()> {
     let p3 = true;
     let verbose = true;
 
-    let matches = App::new("mirvestigator")
-        .version("1.0")
-        .about("Find miRNA matches")
-        .arg(Arg::with_name("SEQS")
-             .help("Path to sequence text file")
-             .required(true))
-        .arg(Arg::with_name("PSSMS")
-             .help("Path to PSSMs JSON file")
-             .required(true))
-        .arg(Arg::with_name("MIRBASE")
-             .help("Path to mature.fa.gz file")
-             .required(true))
-        .get_matches();
-
-    let seqs_path = matches.value_of("SEQS").unwrap();
-    let pssm_path = matches.value_of("PSSMS").unwrap();
-    let mirbase_path = matches.value_of("MIRBASE").unwrap();
+    let args = Args::parse();
 
     // p3utr_seqs are solely used for filtering the kmer lists
-    let p3utr_seqs = read_seqs(seqs_path);
+    let p3utr_seqs = read_seqs(&args.seqs);
 
     // Read in the JSON pssms file
     let mut pssms_json = String::new();
-    let mut f2 = File::open(pssm_path)?;
+    let mut f2 = File::open(&args.pssms)?;
     let _ = f2.read_to_string(&mut pssms_json);
     let pssms = json::parse(pssms_json.as_str()).unwrap();
     if verbose {
@@ -562,7 +558,7 @@ fn main() -> io::Result<()> {
     }
 
     /* This HashMap is used to complement and reverse complement */
-    let mirnas = read_mirnas(mirbase_path, 0, 8, minor, p5, p3);
+    let mirnas = read_mirnas(&args.mirbase, 0, 8, minor, p5, p3);
     let mirnas_6mer = trim_seqs(&mirnas, 0, 6);
     let mirnas_7mer_m8 = trim_seqs(&mirnas, 1, 8);
     let mirnas_7mer_a1 = trim_seqs(&mirnas, 0, 7);
@@ -581,7 +577,10 @@ fn main() -> io::Result<()> {
     for i in 0..pssms.len() {
         pssm_vec.push(&pssms[i]);
     }
+
     // TODO: collect all the matches together and write them out
+    let output = Arc::new(Mutex::new(File::create(args.outfile)?));
+
     pssm_vec.par_iter().for_each(|pssm| {
         let matches = detect_pssm(pssm,
                                   &mirnas_6mer,
@@ -596,7 +595,7 @@ fn main() -> io::Result<()> {
             } else {
                 String::from(NA)
             };
-            println!("{},{},{}", pssm_name, mirna_str, label);
+            let _res = writeln!(&mut (output.lock().unwrap()), "{},{},{}", pssm_name, mirna_str, label);
         }
     });
 
